@@ -49,6 +49,12 @@ async def fetch_model_availability():
     url = "https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&tabs=global-standard-aoai%2Cglobal-standard&pivots=azure-openai"
     return await fetch_from_msft_mcp(url)
 
+async def fetch_model_info():
+    """Fetch the Azure model information page from Microsoft Learn."""
+    url = "https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&tabs=global-standard-aoai%2Cglobal-standard&pivots=azure-openai"
+    return await fetch_from_msft_mcp(url)
+
+
 async def fetch_whats_new():
     """Fetch the Azure OpenAI Service What's New page from Microsoft Learn."""
     url = "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/whats-new?view=foundry-classic"

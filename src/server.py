@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
-from providers.azure import fetch_model_pricing, fetch_model_retirements, fetch_whats_new, fetch_model_availability
+from providers.azure import fetch_model_pricing, fetch_model_retirements
+from providers.azure import fetch_whats_new, fetch_model_availability, fetch_model_info
 
 #this is mcp server name 
 mcp = FastMCP("model-intel")
@@ -33,6 +34,13 @@ async def get_model_availability():
     result = await fetch_model_availability()
     return result
         
+@mcp.tool()
+async def get_model_info():
+    """this brings information for the model given as input by user."""
+    result = await fetch_model_info()
+    return result
+        
+
 @mcp.tool()
 async def get_whats_new() -> str:
     """this brings what's new information from the provider given as input by user."""
