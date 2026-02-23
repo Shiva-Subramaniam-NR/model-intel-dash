@@ -22,6 +22,8 @@ from providers.azure import (
     fetch_available_regions,
     fetch_pricing_as_list
 )
+from providers.status import fetch_all_statuses, ServiceHealth
+from utils.table_parser import parse_retirement_tables
 
 # --- Helper ---
 def run_async(coro):
@@ -63,56 +65,22 @@ def get_pricing_data(region):
 def get_model_info_data():
     return run_async(fetch_model_info())
 
-
-def parse_retirement_tables(text):
-    """Parse markdown tables from retirement data into a DataFrame."""
-    all_rows = []
-    current_category = ""
-    in_table = False
-
-    for line in text.split("\n"):
-        line = line.strip()
-
-        # Detect category headers
-        if line.startswith("### "):
-            candidate = line.replace("### ", "").strip()
-            if candidate in ["Text generation", "Audio", "Image and video", "Embedding", "Fine-tuned models"]:
-                current_category = candidate
-                in_table = False
-            continue
-
-        # Detect table header row
-        if "Model Name" in line and "|" in line:
-            in_table = True
-            continue
-
-        # Skip separator rows
-        if in_table and line.startswith("|") and set(line.replace("|", "").replace("-", "").replace(" ", "")) <= set(":"):
-            continue
-
-        # Parse data rows
-        if in_table and line.startswith("|") and line.endswith("|"):
-            parts = line.split("|")
-            parts = [p.strip().strip("`").strip("*") for p in parts if p.strip()]
-
-            if len(parts) >= 4:
-                model = parts[0].strip()
-                if model in ["Model Name", "Model", "---", ""] or all(c in "-: " for c in model):
-                    continue
-
-                all_rows.append({
-                    "Category": current_category,
-                    "Model": model,
-                    "Version": parts[1].strip() if len(parts) > 1 else "",
-                    "Status": parts[2].strip().strip("`") if len(parts) > 2 else "",
-                    "Deprecation": parts[3].strip() if len(parts) > 3 else "N/A",
-                    "Retirement": parts[4].strip() if len(parts) > 4 else "N/A",
-                    "Replacement": parts[5].strip().strip("`") if len(parts) > 5 else ""
-                })
-        elif in_table and not line.startswith("|") and line != "":
-            in_table = False
-
-    return pd.DataFrame(all_rows) if all_rows else pd.DataFrame()
+@st.cache_data(ttl=300, show_spinner="Checking service status...")
+def get_service_status():
+    """Fetch status from all 5 AI cloud providers (cached for 5 minutes)."""
+    statuses = fetch_all_statuses()
+    return [
+        {
+            "provider": s.provider,
+            "status": s.status.value,
+            "description": s.description,
+            "last_checked": s.last_checked.isoformat(),
+            "incidents": s.incidents,
+            "status_page_url": s.status_page_url,
+            "error": s.error,
+        }
+        for s in statuses
+    ]
 
 
 def parse_single_availability_table(text, marker):
@@ -333,7 +301,7 @@ with main_col:
     st.divider()
 
     # --- Tabs ---
-    tab1, tab2, tab3 = st.tabs(["Availability", "Pricing", "What's New"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Availability", "Pricing", "What's New", "Service Status"])
 
     # --- Tab 1: Availability ---
     with tab1:
@@ -435,6 +403,44 @@ with main_col:
         st.subheader("What's New in Azure OpenAI")
         whats_new_data = get_whats_new_data()
         st.markdown(whats_new_data)
+
+    # --- Tab 4: Service Status ---
+    with tab4:
+        st.subheader("Cloud AI Service Status")
+        statuses = get_service_status()
+
+        status_colors = {
+            "operational": "green",
+            "degraded": "orange",
+            "partial_outage": "red",
+            "major_outage": "red",
+            "unknown": "gray",
+        }
+
+        # Status cards row
+        cols = st.columns(5)
+        for i, s in enumerate(statuses):
+            with cols[i]:
+                color = status_colors.get(s["status"], "gray")
+                st.markdown(f":{color}_circle: **{s['provider']}**")
+                st.caption(s["description"])
+                if s["incidents"]:
+                    for inc in s["incidents"][:3]:
+                        st.markdown(f"- {inc['title'][:80]}")
+                st.markdown(f"[Status Page]({s['status_page_url']})")
+
+        # Summary table
+        st.markdown("---")
+        status_df = pd.DataFrame([
+            {
+                "Provider": s["provider"],
+                "Status": s["status"].replace("_", " ").title(),
+                "Description": s["description"],
+                "Active Incidents": len([inc for inc in s["incidents"] if inc.get("status") != "resolved"]),
+            }
+            for s in statuses
+        ])
+        st.dataframe(status_df, use_container_width=True, hide_index=True)
 
 
 # === CHATBOT (Right Column) ===

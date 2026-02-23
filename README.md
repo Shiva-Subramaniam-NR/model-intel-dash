@@ -1,6 +1,6 @@
 # Model Intelligence Dashboard
 
-A unified dashboard for Azure OpenAI model lifecycle management — retirements, pricing, availability, and announcements — powered by MCP (Model Context Protocol) with an AI chatbot assistant.
+A unified dashboard for Azure OpenAI model lifecycle management — retirements, pricing, availability, and announcements — powered by MCP (Model Context Protocol) with an AI chatbot assistant, automated retirement reminders, and multi-cloud outage monitoring.
 
 ## Architecture
 
@@ -33,11 +33,31 @@ A unified dashboard for Azure OpenAI model lifecycle management — retirements,
 | - Availability   |    |   - REST API calls   |    |  api/mcp                |
 | - Pricing tab    |    +---------------------+    +-------------------------+
 | - What's New tab |              |
-| - AI Chatbot     |              |                 +-------------------------+
-+------------------+              +---------------->|  Azure Retail Prices    |
-                                                    |  API (REST)             |
-                                                    |  prices.azure.com      |
-                                                    +-------------------------+
+| - Service Status |              |                 +-------------------------+
+| - AI Chatbot     |              +---------------->|  Azure Retail Prices    |
++------------------+                                |  API (REST)             |
+        |                                           |  prices.azure.com      |
+        v                                           +-------------------------+
++------------------+    +-------------------------+
+| status.py        |--->| Status Page APIs:       |
+| (Status Provider)|    | - status.openai.com     |
+| - 5 providers    |    | - status.anthropic.com  |
++------------------+    | - status.aws.amazon.com |
+        |               | - azure.status.microsoft|
+        v               | - status.cloud.google   |
++------------------+    +-------------------------+
+| notifications/   |
+| - reminder.py    |---> Gmail SMTP (weekly retirement alerts)
+| - alerts.py      |---> Gmail SMTP (outage alerts every 30 min)
+| - email_sender.py|
++------------------+
+        ^
+        |
++------------------+
+| GitHub Actions   |
+| - weekly-reminder|
+| - outage-monitor |
++------------------+
 ```
 
 ### Design Patterns
@@ -45,26 +65,42 @@ A unified dashboard for Azure OpenAI model lifecycle management — retirements,
 - **MCP-to-MCP**: The server acts as both an MCP server (for Claude Desktop) and an MCP client (calling Microsoft Learn MCP Server). This eliminates web scraping for documentation pages.
 - **REST API for Pricing**: Azure Retail Prices API provides structured JSON for pricing data — no scraping needed.
 - **AI Chatbot**: Instead of parsing complex markdown tables from MCP responses, the raw data is sent as context to OpenAI GPT-4o-mini which interprets it naturally.
-- **Caching**: Streamlit `@st.cache_data(ttl=3600)` caches all MCP/API responses for 1 hour to avoid repeated calls.
+- **Multi-cloud Status Monitoring**: Uses statuspage.io JSON APIs (OpenAI, Anthropic), RSS feeds (AWS, Azure), and JSON endpoints (GCP) for unified outage tracking.
+- **Automated Alerts**: GitHub Actions cron jobs trigger email notifications for retiring models and service outages.
+- **Caching**: Streamlit `@st.cache_data` caches data — 1 hour for MCP/API data, 5 minutes for service status.
 
 ## Folder Structure
 
 ```
 model-intel-mcp/
-├── .env                        # OpenAI API key (not committed)
-├── .gitignore                  # Ignores .env, .venv, __pycache__, *.txt
-├── README.md                   # This file
-├── bkp/                        # Backup of Phase 1 (httpx + BeautifulSoup)
+├── .env                              # API keys and email config (not committed)
+├── .gitignore                        # Ignores .env, .venv, __pycache__, *.txt
+├── README.md                         # This file
+├── requirements.txt                  # All Python dependencies
+├── bkp/                              # Backup of Phase 1 (httpx + BeautifulSoup)
 │   ├── bkpazure.py
 │   └── bkpserver.py
 ├── src/
 │   ├── __init__.py
-│   ├── server.py               # MCP Server — registers tools for Claude Desktop
-│   ├── dashboard.py            # Streamlit dashboard + AI chatbot
-│   └── providers/
+│   ├── server.py                     # MCP Server — registers tools for Claude Desktop
+│   ├── dashboard.py                  # Streamlit dashboard + AI chatbot
+│   ├── providers/
+│   │   ├── __init__.py
+│   │   ├── azure.py                  # Azure data provider (MCP client + REST API)
+│   │   └── status.py                 # Multi-cloud outage status fetcher (5 providers)
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── table_parser.py           # Retirement table markdown parser (shared)
+│   │   └── date_parser.py            # Retirement date extractor (handles 5 date formats)
+│   └── notifications/
 │       ├── __init__.py
-│       └── azure.py            # Azure data provider (MCP client + REST API)
-└── tests/                      # Test directory (future)
+│       ├── email_sender.py           # Shared Gmail SMTP utility
+│       ├── reminder.py               # Weekly retirement reminder script
+│       └── alerts.py                 # Outage alert script
+├── .github/workflows/
+│   ├── weekly-reminder.yml           # Cron: every Monday 9AM UTC
+│   └── outage-monitor.yml            # Cron: every 30 minutes
+└── tests/                            # Test directory
 ```
 
 ### Key Files
@@ -72,9 +108,14 @@ model-intel-mcp/
 | File | Purpose |
 |------|---------|
 | `src/server.py` | MCP server with 6 tools, runs via `FastMCP("model-intel")` |
-| `src/providers/azure.py` | Data fetching layer — MCP-to-MCP for docs, REST API for pricing |
-| `src/dashboard.py` | Streamlit UI with filters, tabs, and OpenAI-powered chatbot |
-| `.env` | Stores `OPENAI_API_KEY` for the chatbot (never committed) |
+| `src/providers/azure.py` | Data fetching — MCP-to-MCP for docs, REST API for pricing |
+| `src/providers/status.py` | Fetches outage status from OpenAI, Anthropic, AWS, Azure, GCP |
+| `src/dashboard.py` | Streamlit UI with filters, tabs, service status, and AI chatbot |
+| `src/utils/date_parser.py` | Extracts dates from 5 different retirement text formats |
+| `src/utils/table_parser.py` | Parses markdown retirement tables into DataFrames |
+| `src/notifications/reminder.py` | Standalone script: finds models retiring in 60 days, emails alert |
+| `src/notifications/alerts.py` | Standalone script: checks 5 providers, emails if outages found |
+| `.env` | Stores API keys and email config (never committed) |
 
 ## MCP Tools
 
@@ -97,6 +138,11 @@ model-intel-mcp/
 | What's New | Microsoft Learn docs | MCP-to-MCP |
 | Pricing | Azure Retail Prices API | REST (`prices.azure.com/api/retail/prices`) |
 | Available Regions | Azure Retail Prices API | REST |
+| OpenAI Status | status.openai.com | JSON API (statuspage.io) |
+| Anthropic Status | status.anthropic.com | JSON API (statuspage.io) |
+| AWS Bedrock Status | status.aws.amazon.com | RSS feed |
+| Azure AI Status | azure.status.microsoft | RSS feed |
+| GCP Vertex AI Status | status.cloud.google.com | JSON endpoint |
 
 ## Dashboard Features
 
@@ -104,8 +150,23 @@ model-intel-mcp/
 - **Availability Tab**: Region-by-model grid with deployment type selector (Global Standard, Provisioned, Data Zone, etc.)
 - **Pricing Tab**: Searchable pricing table auto-filtered by sidebar model selection
 - **What's New Tab**: Latest Azure OpenAI announcements rendered as markdown
+- **Service Status Tab**: Real-time outage monitoring for 5 AI cloud providers with colored indicators
 - **AI Chatbot**: Right-side panel powered by OpenAI GPT-4o-mini — ask natural language questions about any Azure OpenAI model
 - **Sidebar Filters**: Dynamic model and region dropdowns, refresh button
+
+## Automated Notifications
+
+### Weekly Retirement Reminders
+- Runs every Monday at 9AM UTC via GitHub Actions
+- Scans retirement data for models retiring within 60 days
+- Sends HTML email with urgency color-coding (red/orange/yellow)
+- Can also be triggered manually from GitHub Actions UI
+
+### Outage Alerts
+- Runs every 30 minutes via GitHub Actions
+- Checks all 5 AI cloud providers for active incidents
+- Sends email only when outages are detected (no spam when all operational)
+- Can also be triggered manually from GitHub Actions UI
 
 ## Setup Instructions
 
@@ -114,6 +175,7 @@ model-intel-mcp/
 - Python 3.11+
 - Git
 - An OpenAI API key (for the chatbot feature)
+- A Gmail account with App Password (for email notifications)
 
 ### 1. Clone the Repository
 
@@ -137,7 +199,7 @@ source .venv/bin/activate
 ### 3. Install Dependencies
 
 ```bash
-pip install mcp httpx python-dotenv beautifulsoup4 streamlit pandas openai
+pip install -r requirements.txt
 ```
 
 ### 4. Configure Environment Variables
@@ -146,7 +208,15 @@ Create a `.env` file in the project root:
 
 ```
 OPENAI_API_KEY=sk-your-openai-api-key-here
+GMAIL_USER=your-gmail@gmail.com
+GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+REMINDER_RECIPIENTS=alice@example.com,bob@example.com
 ```
+
+**How to get a Gmail App Password:**
+1. Go to https://myaccount.google.com/apppasswords
+2. Select "Mail" and your device
+3. Copy the 16-character password
 
 ### 5. Run the Streamlit Dashboard
 
@@ -156,7 +226,17 @@ streamlit run src/dashboard.py
 
 The dashboard will open at `http://localhost:8501`.
 
-### 6. Connect to Claude Desktop (Optional)
+### 6. Test Email Notifications Locally
+
+```bash
+# Test retirement reminder
+python src/notifications/reminder.py
+
+# Test outage alerts
+python src/notifications/alerts.py
+```
+
+### 7. Connect to Claude Desktop (Optional)
 
 Add this to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
@@ -172,6 +252,18 @@ Add this to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.
 ```
 
 Restart Claude Desktop. You should see the hammer icon with 6 tools available.
+
+### 8. Configure GitHub Actions Secrets
+
+Go to your repo > Settings > Secrets and Variables > Actions, and add:
+
+| Secret | Value |
+|--------|-------|
+| `GMAIL_USER` | Your Gmail address |
+| `GMAIL_APP_PASSWORD` | Your Gmail app password |
+| `REMINDER_RECIPIENTS` | Comma-separated email addresses |
+
+The workflows will start running automatically on their schedules.
 
 ## Running & Debugging
 
@@ -212,26 +304,28 @@ streamlit run src/dashboard.py --logger.level=debug
       "request": "launch",
       "program": "src/server.py",
       "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Retirement Reminder",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "src/notifications/reminder.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Outage Alerts",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "src/notifications/alerts.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
     }
   ]
 }
 ```
 
 4. Press **F5** to start debugging with breakpoints
-
-### Test Individual Functions
-
-```python
-# Quick test for pricing API
-import asyncio
-from src.providers.azure import fetch_model_pricing, fetch_model_retirements
-
-# Sync function — call directly
-print(fetch_model_pricing("swedencentral"))
-
-# Async function — use asyncio.run()
-print(asyncio.run(fetch_model_retirements()))
-```
 
 ### Common Issues
 
@@ -242,17 +336,20 @@ print(asyncio.run(fetch_model_retirements()))
 | Chatbot says "set OPENAI_API_KEY" | Create `.env` file in project root with your key |
 | MCP server disconnects in Claude | Check `claude_desktop_config.json` paths are correct |
 | Streamlit caching stale data | Click "Refresh All Data" button in sidebar |
+| Email sending fails | Verify Gmail App Password (not regular password) and check SMTP access |
+| Service Status shows "Unknown" | Provider's status page may be temporarily unreachable |
 
 ## Requirements
 
 | Package | Purpose |
 |---------|---------|
 | `mcp` | Model Context Protocol SDK — server and client |
-| `httpx` | HTTP client for Azure Retail Prices REST API |
-| `python-dotenv` | Loads `.env` file for API keys |
+| `httpx` | HTTP client for Azure Retail Prices REST API and status page APIs |
+| `python-dotenv` | Loads `.env` file for API keys and email config |
 | `streamlit` | Dashboard UI framework |
 | `pandas` | DataFrames for structured table display |
 | `openai` | OpenAI SDK for the AI chatbot |
+| `feedparser` | RSS feed parser for AWS and Azure status feeds |
 | `beautifulsoup4` | HTML parsing (retained for backup compatibility) |
 
 ## Future Plans
@@ -261,4 +358,4 @@ print(asyncio.run(fetch_model_retirements()))
 - Add GCP Vertex AI model information
 - Cost comparison across cloud providers
 - Model recommendation engine
-- Automated retirement alerting via email/Slack
+- Slack integration for alerts

@@ -1,0 +1,8 @@
+mcp
+httpx
+python-dotenv
+beautifulsoup4
+streamlit
+pandas
+openai
+feedparser
