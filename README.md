@@ -168,6 +168,14 @@ model-intel-mcp/
 - Sends email only when outages are detected (no spam when all operational)
 - Can also be triggered manually from GitHub Actions UI
 
+### Pricing Change Monitor
+- Runs every 12 hours via GitHub Actions
+- Snapshots pricing for all Azure regions via the Retail Prices API
+- Compares against previous snapshot to detect: price increases, decreases, new meters, removed meters
+- Sends color-coded HTML email: red for increases, green for decreases, blue for new entries
+- Snapshot is committed back to the repo (`data/pricing_snapshot.json`) — git history tracks all price changes over time
+- Can also be triggered manually from GitHub Actions UI
+
 ## Setup Instructions
 
 ### Prerequisites

@@ -485,10 +485,9 @@ with chat_col:
                             {
                                 "role": "system",
                                 "content": (
-                                    "You are an Azure OpenAI model expert assistant. "
-                                    "Answer user questions based on the following data fetched from Microsoft Learn documentation. "
+                                    "You are an expert in Gen Ai and LLM concepts. "
+                                    "Answer the user queries on anything regarding LLM Models"
                                     "Be concise, accurate, and format responses with markdown when helpful. "
-                                    "If the answer is not in the data, say so clearly.\n\n"
                                     f"{context}"
                                 )
                             },
