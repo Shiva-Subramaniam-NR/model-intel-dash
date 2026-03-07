@@ -1,16 +1,21 @@
 """
 Azure OpenAI Pricing Change Detector
 
-Compares current Azure OpenAI pricing against a stored snapshot to detect
+Compares current Azure OpenAI pricing against the previous run to detect
 price increases, decreases, new meters, and removed meters. Sends an email
 alert when changes are found.
 
-The snapshot is stored as data/pricing_snapshot.json and committed back to
-the repo by GitHub Actions after each run — giving us a git history of
-all price changes over time.
+Keeps exactly 2 files in data/:
+  - pricing_previous.json  (last run's data)
+  - pricing_current.json   (this run's data)
 
-Run: python src/notifications/pricing_monitor.py
-Scheduled via: .github/workflows/pricing-monitor.yml (every 12 hours)
+On each run:
+  1. Fetch fresh pricing for all regions
+  2. Compare against pricing_previous.json (if it exists)
+  3. Send email if changes detected
+  4. Rotate: current -> previous, save new current
+
+Run manually: python src/notifications/pricing_monitor.py
 """
 
 import sys
@@ -27,32 +32,30 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from providers.azure import fetch_pricing_as_list, fetch_available_regions
 from notifications.email_sender import send_html_email
 
-# Path to the snapshot file
-SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "pricing_snapshot.json")
+# Paths to the two pricing files
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+PREVIOUS_PATH = os.path.join(DATA_DIR, "pricing_previous.json")
+CURRENT_PATH = os.path.join(DATA_DIR, "pricing_current.json")
 
 
-def load_previous_snapshot():
-    """Load the previous pricing snapshot from disk."""
-    if not os.path.exists(SNAPSHOT_PATH):
-        return {"timestamp": "", "prices": {}}
-
-    with open(SNAPSHOT_PATH, "r") as f:
+def load_json(path):
+    """Load a pricing JSON file. Returns None if it doesn't exist."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
         return json.load(f)
 
 
-def save_snapshot(current_prices):
-    """Save the current pricing data as the new snapshot."""
-    os.makedirs(os.path.dirname(SNAPSHOT_PATH), exist_ok=True)
-
-    snapshot = {
+def save_json(path, prices):
+    """Save pricing data to a JSON file with timestamp."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "prices": current_prices,
+        "prices": prices,
     }
-
-    with open(SNAPSHOT_PATH, "w") as f:
-        json.dump(snapshot, f, indent=2)
-
-    print(f"Snapshot saved to {SNAPSHOT_PATH}")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved: {path}")
 
 
 def fetch_all_pricing():
@@ -243,26 +246,24 @@ def build_pricing_email_html(changes, prev_timestamp):
 def main():
     print("=== Azure OpenAI Pricing Change Detector ===\n")
 
-    # Step 1: Load previous snapshot
-    previous = load_previous_snapshot()
-    prev_timestamp = previous.get("timestamp", "")
-    prev_prices = previous.get("prices", {})
+    # Step 1: Load previous data (from pricing_previous.json)
+    previous = load_json(PREVIOUS_PATH)
+    is_first_run = previous is None
 
-    is_first_run = not prev_timestamp
     if is_first_run:
-        print("First run detected — no previous snapshot to compare against.")
+        print("First run — no previous pricing file found.")
     else:
-        print(f"Previous snapshot from: {prev_timestamp}")
+        print(f"Previous pricing from: {previous.get('timestamp', 'unknown')}")
 
     # Step 2: Fetch current pricing for all regions
     current_prices = fetch_all_pricing()
 
     # Step 3: Compare (skip on first run)
     if not is_first_run:
+        prev_prices = previous.get("prices", {})
         changes = compare_pricing(prev_prices, current_prices)
 
         if changes:
-            # Summarize
             increased = sum(1 for c in changes if c["change_type"] == "increased")
             decreased = sum(1 for c in changes if c["change_type"] == "decreased")
             new_count = sum(1 for c in changes if c["change_type"] == "new")
@@ -271,17 +272,21 @@ def main():
             print(f"\nChanges detected: {len(changes)} total")
             print(f"  Increases: {increased}, Decreases: {decreased}, New: {new_count}, Removed: {removed}")
 
-            # Step 4: Send email alert
             subject = f"[Pricing Alert] {len(changes)} Azure OpenAI pricing changes detected"
-            html_body = build_pricing_email_html(changes, prev_timestamp)
+            html_body = build_pricing_email_html(changes, previous.get("timestamp", ""))
             send_html_email(subject, html_body)
         else:
             print("\nNo pricing changes detected.")
     else:
         print("\nSkipping comparison (first run).")
 
-    # Step 5: Save current snapshot
-    save_snapshot(current_prices)
+    # Step 4: Rotate files — current becomes previous, save new current
+    if os.path.exists(CURRENT_PATH):
+        # Move current -> previous (overwrite previous)
+        os.replace(CURRENT_PATH, PREVIOUS_PATH)
+        print(f"Rotated: pricing_current.json -> pricing_previous.json")
+
+    save_json(CURRENT_PATH, current_prices)
     print("\nDone.")
 
 

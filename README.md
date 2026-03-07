@@ -96,7 +96,11 @@ model-intel-mcp/
 │       ├── __init__.py
 │       ├── email_sender.py           # Shared Gmail SMTP utility
 │       ├── reminder.py               # Weekly retirement reminder script
-│       └── alerts.py                 # Outage alert script
+│       ├── alerts.py                 # Outage alert script
+│       └── pricing_monitor.py        # Pricing change detector (manual run)
+├── data/                             # Pricing snapshots (git-ignored)
+│   ├── pricing_previous.json         # Last run's pricing data
+│   └── pricing_current.json          # This run's pricing data
 ├── .github/workflows/
 │   ├── weekly-reminder.yml           # Cron: every Monday 9AM UTC
 │   └── outage-monitor.yml            # Cron: every 30 minutes
@@ -115,6 +119,7 @@ model-intel-mcp/
 | `src/utils/table_parser.py` | Parses markdown retirement tables into DataFrames |
 | `src/notifications/reminder.py` | Standalone script: finds models retiring in 60 days, emails alert |
 | `src/notifications/alerts.py` | Standalone script: checks 5 providers, emails if outages found |
+| `src/notifications/pricing_monitor.py` | Manual script: compares pricing across all regions, emails if changes found |
 | `.env` | Stores API keys and email config (never committed) |
 
 ## MCP Tools
@@ -169,12 +174,12 @@ model-intel-mcp/
 - Can also be triggered manually from GitHub Actions UI
 
 ### Pricing Change Monitor
-- Runs every 12 hours via GitHub Actions
-- Snapshots pricing for all Azure regions via the Retail Prices API
-- Compares against previous snapshot to detect: price increases, decreases, new meters, removed meters
+- Run manually: `python src/notifications/pricing_monitor.py`
+- Fetches pricing for all Azure regions via the Retail Prices API
+- Compares against the previous run to detect: price increases, decreases, new meters, removed meters
 - Sends color-coded HTML email: red for increases, green for decreases, blue for new entries
-- Snapshot is committed back to the repo (`data/pricing_snapshot.json`) — git history tracks all price changes over time
-- Can also be triggered manually from GitHub Actions UI
+- Keeps exactly 2 files in `data/`: `pricing_previous.json` and `pricing_current.json` (rotated on each run)
+- First run creates the baseline; changes are detected from the second run onward
 
 ## Setup Instructions
 
@@ -242,6 +247,9 @@ python src/notifications/reminder.py
 
 # Test outage alerts
 python src/notifications/alerts.py
+
+# Test pricing change detector (run twice to see comparison)
+python src/notifications/pricing_monitor.py
 ```
 
 ### 7. Connect to Claude Desktop (Optional)

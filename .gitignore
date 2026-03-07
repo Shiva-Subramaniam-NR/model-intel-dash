@@ -3,3 +3,4 @@ __pycache__/
 .env
 *.txt
 !requirements.txt
+data/pricing_*.json
