@@ -25,4 +25,4 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           REMINDER_RECIPIENTS: ${{ secrets.REMINDER_RECIPIENTS }}
-        run: python src/notifications/reminder.py
+        run: python src/notifications/pricing_monitor.py
