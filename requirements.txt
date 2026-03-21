@@ -1,6 +1,5 @@
 mcp
 httpx
 python-dotenv
-beautifulsoup4
 pandas
 feedparser

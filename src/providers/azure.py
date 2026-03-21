@@ -3,7 +3,6 @@
 from mcp.client.streamable_http import streamable_http_client
 from mcp import ClientSession
 import httpx
-from bs4 import BeautifulSoup as beautifulsoup
 
 client = httpx.Client()
 
@@ -18,7 +17,7 @@ async def fetch_model_retirements():
 def fetch_model_pricing(region: str):
     """Fetch the Azure model pricing page from Microsoft Learn."""
     url = f"https://prices.azure.com/api/retail/prices?$filter=contains(productName, 'OpenAI') and armRegionName eq '{region}'&$top=100"
-    
+
     #fetch all the items from the API response with pagination
     items = []
     while url:
@@ -43,22 +42,6 @@ def fetch_model_pricing(region: str):
         output += f"{meter} | ${price} | {unit} | {product}\n"
 
     return output
-
-async def fetch_model_availability():
-    """Fetch the Azure model availability page from Microsoft Learn."""
-    url = "https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&tabs=global-standard-aoai%2Cglobal-standard&pivots=azure-openai"
-    return await fetch_from_msft_mcp(url)
-
-async def fetch_model_info():
-    """Fetch the Azure model information page from Microsoft Learn."""
-    url = "https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&tabs=global-standard-aoai%2Cglobal-standard&pivots=azure-openai"
-    return await fetch_from_msft_mcp(url)
-
-
-async def fetch_whats_new():
-    """Fetch the Azure OpenAI Service What's New page from Microsoft Learn."""
-    url = "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/whats-new?view=foundry-classic"
-    return await fetch_from_msft_mcp(url)
 
 def fetch_available_regions():
     """Fetch all Azure regions that have OpenAI pricing data."""

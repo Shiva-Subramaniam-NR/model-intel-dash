@@ -1,6 +1,6 @@
 # Model Intelligence MCP Server
 
-An MCP server for Azure OpenAI model lifecycle management — retirements, pricing, availability, and announcements — with automated email notifications for model retirements, pricing changes, and multi-cloud outage monitoring.
+An MCP server for Azure OpenAI model lifecycle management with automated email notifications for model retirements, pricing changes, and multi-cloud outage monitoring.
 
 ## Architecture
 
@@ -19,9 +19,6 @@ An MCP server for Azure OpenAI model lifecycle management — retirements, prici
                     |   - hello_checker    |
                     |   - get_model_summary|
                     |   - get_model_pricing|
-                    |   - get_model_avail  |
-                    |   - get_model_info   |
-                    |   - get_whats_new    |
                     +---------+-----------+
                               |
                               | imports
@@ -108,7 +105,7 @@ model-intel-mcp/
 
 | File | Purpose |
 |------|---------|
-| `src/server.py` | MCP server with 6 tools, runs via `FastMCP("model-intel")` |
+| `src/server.py` | MCP server with 3 tools, runs via `FastMCP("model-intel")` |
 | `src/providers/azure.py` | Data fetching — MCP-to-MCP for docs, REST API for pricing |
 | `src/providers/status.py` | Fetches outage status from OpenAI, Anthropic, AWS, Azure, GCP |
 | `src/utils/date_parser.py` | Extracts dates from 5 different retirement text formats |
@@ -124,20 +121,13 @@ model-intel-mcp/
 | `hello_checker` | Sync | Health check — returns welcome message |
 | `get_model_summary` | Async | Model retirement dates and lifecycle info |
 | `get_model_pricing` | Sync | Pricing via Azure Retail Prices REST API |
-| `get_model_availability` | Async | Region availability by deployment type |
-| `get_model_info` | Async | Model specifications (context window, capabilities) |
-| `get_whats_new` | Async | Latest Azure OpenAI announcements |
 
 ## Data Sources
 
 | Data | Source | Method |
 |------|--------|--------|
 | Model Retirements | Microsoft Learn docs | MCP-to-MCP (`learn.microsoft.com/api/mcp`) |
-| Model Availability | Microsoft Learn docs | MCP-to-MCP |
-| Model Info | Microsoft Learn docs | MCP-to-MCP |
-| What's New | Microsoft Learn docs | MCP-to-MCP |
 | Pricing | Azure Retail Prices API | REST (`prices.azure.com/api/retail/prices`) |
-| Available Regions | Azure Retail Prices API | REST |
 | OpenAI Status | status.openai.com | JSON API (statuspage.io) |
 | Anthropic Status | status.anthropic.com | JSON API (statuspage.io) |
 | AWS Bedrock Status | status.aws.amazon.com | RSS feed |
@@ -242,7 +232,7 @@ Add this to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.
 }
 ```
 
-Restart Claude Desktop. You should see the hammer icon with 6 tools available.
+Restart Claude Desktop. You should see the hammer icon with 3 tools available.
 
 ### 7. Configure GitHub Actions Secrets
 
@@ -326,7 +316,6 @@ Create `.vscode/launch.json`:
 | `python-dotenv` | Loads `.env` file for API keys and email config |
 | `pandas` | DataFrames for retirement table parsing |
 | `feedparser` | RSS feed parser for AWS and Azure status feeds |
-| `beautifulsoup4` | HTML parsing (backup compatibility) |
 
 ## Future Plans
 
