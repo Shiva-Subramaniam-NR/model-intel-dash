@@ -79,7 +79,7 @@ def fetch_available_regions():
 
 
 def fetch_pricing_as_list(region: str):
-    """Fetch Azure OpenAI pricing as a list of dicts for Streamlit dataframes."""
+    """Fetch Azure OpenAI pricing as a list of dicts."""
     url = f"https://prices.azure.com/api/retail/prices?$filter=contains(productName, 'OpenAI') and armRegionName eq '{region}'"
 
     items = []
