@@ -26,3 +26,11 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           REMINDER_RECIPIENTS: ${{ secrets.REMINDER_RECIPIENTS }}
         run: python src/notifications/pricing_monitor.py
+
+      - name: Commit updated pricing snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/pricing_previous.json data/pricing_current.json
+          git diff --cached --quiet || git commit -m "Update pricing snapshots [automated]"
+          git push
