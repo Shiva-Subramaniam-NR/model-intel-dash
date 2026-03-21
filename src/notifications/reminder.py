@@ -40,17 +40,22 @@ def get_upcoming_retirements():
     upcoming = []
 
     for _, row in df.iterrows():
-        retirement_date = extract_retirement_date(row.get("Retirement", ""))
+        raw = row.get("Retirement", "")
+        retirement_date = extract_retirement_date(raw)
         if retirement_date and today <= retirement_date <= cutoff:
+            is_tentative = any(x in raw.lower() for x in [
+                "no earlier", "not retire before", "as early as"
+            ])
             upcoming.append({
                 "model": row.get("Model", ""),
                 "version": row.get("Version", ""),
                 "category": row.get("Category", ""),
                 "status": row.get("Status", ""),
                 "retirement_date": retirement_date,
-                "retirement_raw": row.get("Retirement", ""),
+                "retirement_raw": raw,
                 "replacement": row.get("Replacement", ""),
                 "days_until": (retirement_date - today).days,
+                "tentative": is_tentative,
             })
 
     upcoming.sort(key=lambda x: x["days_until"])
@@ -59,39 +64,39 @@ def get_upcoming_retirements():
 
 def build_email_html(upcoming):
     """Build an HTML email body with a table of upcoming retirements."""
-    rows_html = ""
-    for item in upcoming:
-        days = item["days_until"]
-        if days <= 14:
-            color = "#dc3545"   # red — urgent
-        elif days <= 30:
-            color = "#fd7e14"   # orange — warning
-        else:
-            color = "#ffc107"   # yellow — attention
+    confirmed = [m for m in upcoming if not m["tentative"]]
+    tentative = [m for m in upcoming if m["tentative"]]
 
-        rows_html += f"""
-        <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;">
-                <span style="display:inline-block; width:10px; height:10px;
-                      background:{color}; border-radius:50%; margin-right:6px;"></span>
-                {item['days_until']} days
-            </td>
-            <td style="padding: 8px; border: 1px solid #ddd;"><strong>{item['model']}</strong></td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{item['version']}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{item['category']}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{item['retirement_date']}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{item['replacement'] or 'N/A'}</td>
-        </tr>
-        """
+    def _build_rows(items):
+        rows_html = ""
+        for item in items:
+            days = item["days_until"]
+            if days <= 14:
+                color = "#dc3545"   # red — urgent
+            elif days <= 30:
+                color = "#fd7e14"   # orange — warning
+            else:
+                color = "#ffc107"   # yellow — attention
 
-    html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333;">
-        <h2>Azure OpenAI Model Retirement Reminder</h2>
-        <p>The following <strong>{len(upcoming)}</strong> model(s) are retiring within
-           the next <strong>{DAYS_THRESHOLD} days</strong>:</p>
+            rows_html += f"""
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <span style="display:inline-block; width:10px; height:10px;
+                          background:{color}; border-radius:50%; margin-right:6px;"></span>
+                    {item['days_until']} days
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>{item['model']}</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{item['version']}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{item['category']}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{item['retirement_date']}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{item['replacement'] or 'N/A'}</td>
+            </tr>
+            """
+        return rows_html
 
-        <table style="border-collapse: collapse; width: 100%; margin-top: 16px;">
+    def _build_table(rows_html):
+        return f"""
+        <table style="border-collapse: collapse; width: 100%; margin-top: 8px;">
             <thead>
                 <tr style="background: #f8f9fa;">
                     <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Urgency</th>
@@ -106,10 +111,36 @@ def build_email_html(upcoming):
                 {rows_html}
             </tbody>
         </table>
+        """
 
+    sections = ""
+
+    if confirmed:
+        sections += f"""
+        <h3 style="margin-top: 24px; color: #dc3545;">Confirmed Retirements ({len(confirmed)})</h3>
+        <p>These models have a confirmed retirement date.</p>
+        {_build_table(_build_rows(confirmed))}
+        """
+
+    if tentative:
+        sections += f"""
+        <h3 style="margin-top: 24px; color: #fd7e14;">Tentative Retirements ({len(tentative)})</h3>
+        <p>These models have a &quot;No earlier than&quot; date — retirement is not yet confirmed
+           but could happen on or after this date.</p>
+        {_build_table(_build_rows(tentative))}
+        """
+
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+        <h2>Azure OpenAI Model Retirement Reminder</h2>
+        <p>The following <strong>{len(upcoming)}</strong> model(s) are retiring within
+           the next <strong>{DAYS_THRESHOLD} days</strong>
+           ({len(confirmed)} confirmed, {len(tentative)} tentative):</p>
+        {sections}
         <p style="margin-top: 16px; color: #666; font-size: 12px;">
             Source: Microsoft Learn Documentation via MCP Server<br>
-            Generated by Model Intelligence Dashboard
+            Generated by Model Intelligence MCP Server
         </p>
     </body>
     </html>
@@ -125,9 +156,12 @@ def main():
         print("No models retiring within the next 60 days. No email sent.")
         return
 
-    print(f"Found {len(upcoming)} model(s) retiring soon:")
+    confirmed = [m for m in upcoming if not m["tentative"]]
+    tentative = [m for m in upcoming if m["tentative"]]
+    print(f"Found {len(upcoming)} model(s) retiring soon ({len(confirmed)} confirmed, {len(tentative)} tentative):")
     for item in upcoming:
-        print(f"  - {item['model']} v{item['version']} — {item['days_until']} days ({item['retirement_date']})")
+        tag = "TENTATIVE" if item["tentative"] else "CONFIRMED"
+        print(f"  - [{tag}] {item['model']} v{item['version']} — {item['days_until']} days ({item['retirement_date']})")
 
     subject = f"[Model Intel] {len(upcoming)} Azure OpenAI model(s) retiring within {DAYS_THRESHOLD} days"
     html_body = build_email_html(upcoming)
