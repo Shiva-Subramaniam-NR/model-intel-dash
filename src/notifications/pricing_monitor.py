@@ -32,7 +32,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from collections import defaultdict
 from providers.azure import fetch_pricing_as_list, fetch_available_regions
 from notifications.email_sender import send_html_email
-from utils.meter_parser import parse_meter
+from utils.meter_parser import parse_meter, group_pricing
 
 # Paths to the two pricing files
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
@@ -329,6 +329,110 @@ def build_pricing_email_html(changes, prev_timestamp):
     return html
 
 
+def build_no_change_email_html(current_prices, prev_timestamp):
+    """
+    Build an HTML email showing the full current pricing list when no changes
+    were detected. Uses eastus as the reference region. Every price row is
+    badged 'No Change' in grey instead of NEW / INCREASED / etc.
+    """
+    # Use eastus as reference; fall back to first available region
+    ref_region = "eastus" if "eastus" in current_prices else next(iter(current_prices))
+    items = current_prices[ref_region]
+
+    # Enrich with parsed fields
+    enriched = []
+    for item in items:
+        parsed = parse_meter(item["Meter"], item.get("SkuName", ""), item["Product"])
+        enriched.append({**item, **parsed})
+
+    grouped = group_pricing(enriched)
+
+    prev_time = prev_timestamp or "N/A"
+    curr_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    total_meters = sum(len(v) for v in current_prices.values())
+    no_change_badge = '<span style="color:#888;font-weight:bold;">NO CHANGE</span>'
+
+    sections_html = ""
+    for model_name in sorted(grouped.keys()):
+        deployments = grouped[model_name]
+        rows_html = ""
+
+        for deployment in sorted(deployments.keys()):
+            tiers = deployments[deployment]
+            for tier in sorted(tiers.keys()):
+                directions = tiers[tier]
+
+                header = deployment or "Unknown"
+                if tier != "Standard":
+                    header += f" / {tier}"
+
+                rows_html += f"""
+            <tr style="background: #f0f0f0;">
+                <td colspan="3" style="padding: 6px 10px; font-weight: bold; font-size: 12px; color: #444;">
+                    {header}
+                </td>
+            </tr>"""
+
+                for direction in ["Input", "Cached Input", "Output", "Training", "Hosting"]:
+                    if direction not in directions:
+                        continue
+                    price = directions[direction]
+                    price_str = f"${price:.6f}" if isinstance(price, (int, float)) else str(price)
+                    rows_html += f"""
+            <tr>
+                <td style="padding: 4px 10px 4px 24px; font-size: 13px; width: 140px;">{direction}</td>
+                <td style="padding: 4px 8px; font-size: 13px;">{price_str}</td>
+                <td style="padding: 4px 8px; font-size: 12px;">{no_change_badge}</td>
+            </tr>"""
+
+                # Any remaining directions not in the ordered list
+                for direction, price in sorted(directions.items()):
+                    if direction in ("Input", "Cached Input", "Output", "Training", "Hosting"):
+                        continue
+                    price_str = f"${price:.6f}" if isinstance(price, (int, float)) else str(price)
+                    rows_html += f"""
+            <tr>
+                <td style="padding: 4px 10px 4px 24px; font-size: 13px; width: 140px;">{direction}</td>
+                <td style="padding: 4px 8px; font-size: 13px;">{price_str}</td>
+                <td style="padding: 4px 8px; font-size: 12px;">{no_change_badge}</td>
+            </tr>"""
+
+        sections_html += f"""
+        <div style="margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
+            <div style="background: #555; color: white; padding: 8px 12px; font-size: 14px; font-weight: bold;">
+                {model_name}
+                <span style="font-weight: normal; font-size: 12px; opacity: 0.8;">no change</span>
+            </div>
+            <table style="border-collapse: collapse; width: 100%;">
+                {rows_html}
+            </table>
+        </div>"""
+
+    return f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; max-width: 900px;">
+        <h2>Azure OpenAI Pricing Monitor — No Changes Detected</h2>
+        <p style="font-size: 13px; color: #555;">
+            Regions scanned: <strong>{len(current_prices)}</strong> &nbsp;|&nbsp;
+            Total meters checked: <strong>{total_meters}</strong><br>
+            Previous snapshot: {prev_time}<br>
+            Current check: {curr_time}
+        </p>
+        <p style="color: #888; font-size: 12px;">
+            Prices shown for reference region: <strong>{ref_region}</strong>.
+            Prices may vary slightly across regions.
+        </p>
+
+        {sections_html}
+
+        <p style="margin-top: 16px; color: #666; font-size: 12px;">
+            Generated by Model Intelligence MCP Server — Pricing Monitor
+        </p>
+    </body>
+    </html>
+    """
+
+
 def main():
     print("=== Azure OpenAI Pricing Change Detector ===\n")
 
@@ -362,28 +466,8 @@ def main():
             html_body = build_pricing_email_html(changes, previous.get("timestamp", ""))
             send_html_email(subject, html_body)
         else:
-            print("\nNo pricing changes detected. Sending confirmation email.")
-            prev_time = previous.get("timestamp", "N/A")
-            curr_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            total_meters = sum(len(v) for v in current_prices.values())
-            html_body = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; color: #333;">
-                <h2>Azure OpenAI Pricing Monitor — No Changes Detected</h2>
-                <p>The pricing monitor ran successfully and found
-                   <strong>no pricing changes</strong> across all regions.</p>
-                <p style="font-size: 13px; color: #555;">
-                    Regions scanned: <strong>{len(current_prices)}</strong><br>
-                    Total meters checked: <strong>{total_meters}</strong><br>
-                    Previous snapshot: {prev_time}<br>
-                    Current check: {curr_time}
-                </p>
-                <p style="margin-top: 16px; color: #666; font-size: 12px;">
-                    Generated by Model Intelligence MCP Server — Pricing Monitor
-                </p>
-            </body>
-            </html>
-            """
+            print("\nNo pricing changes detected. Sending full pricing snapshot email.")
+            html_body = build_no_change_email_html(current_prices, previous.get("timestamp", ""))
             send_html_email("[Pricing Monitor] No Azure OpenAI pricing changes detected", html_body)
     else:
         print("\nSkipping comparison (first run).")
