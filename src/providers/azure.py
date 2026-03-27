@@ -15,33 +15,18 @@ async def fetch_model_retirements():
 
 
 def fetch_model_pricing(region: str):
-    """Fetch the Azure model pricing page from Microsoft Learn."""
-    url = f"https://prices.azure.com/api/retail/prices?$filter=contains(productName, 'OpenAI') and armRegionName eq '{region}'&$top=100"
+    """Fetch Azure OpenAI model pricing for a region, grouped by model, deployment type, and tier."""
+    from utils.meter_parser import parse_meter, group_pricing, format_grouped_pricing_text
 
-    #fetch all the items from the API response with pagination
-    items = []
-    while url:
-        request = httpx.Request("GET", url)
-        response = client.send(request, follow_redirects=True)
-        data = response.json()
-        url = data.get('NextPageLink')
-        items.extend(data.get('Items', []))
+    items = fetch_pricing_as_list(region)
 
-    # Sort items by meterName
-    items.sort(key=lambda x: x.get('meterName', ''))
-
-    # Build output with header
-    output = "Meter | Price | Unit | Product\n"
-    output += "-" * 60 + "\n"
-
+    # Enrich with parsed fields
     for item in items:
-        meter = item.get('meterName', 'N/A')
-        price = item.get('retailPrice', 'N/A')
-        unit = item.get('unitOfMeasure', 'N/A')
-        product = item.get('productName', 'N/A')
-        output += f"{meter} | ${price} | {unit} | {product}\n"
+        parsed = parse_meter(item['Meter'], item.get('SkuName', ''), item['Product'])
+        item.update(parsed)
 
-    return output
+    grouped = group_pricing(items)
+    return format_grouped_pricing_text(grouped)
 
 def fetch_available_regions():
     """Fetch all Azure regions that have OpenAI pricing data."""
@@ -83,6 +68,7 @@ def fetch_pricing_as_list(region: str):
             'Price': item.get('retailPrice', 'N/A'),
             'Unit': item.get('unitOfMeasure', 'N/A'),
             'Product': item.get('productName', 'N/A'),
+            'SkuName': item.get('skuName', ''),
         })
     return results
 

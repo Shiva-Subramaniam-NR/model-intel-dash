@@ -23,7 +23,7 @@ async def get_model_summary(provider: str) -> str:
 
 @mcp.tool()
 def get_model_pricing(region: str) -> str:
-    """this brings model pricing information from the provider given as input by user."""
+    """this brings model pricing information from the provider given as input by user. Returns pricing grouped by model, deployment type (Global/DataZone/Regional), and tier (Standard/Provisioned/Batch)."""
     result = fetch_model_pricing(region)
     return result
 
