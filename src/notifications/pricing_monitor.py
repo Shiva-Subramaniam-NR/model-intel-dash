@@ -195,69 +195,109 @@ def build_pricing_email_html(changes, prev_timestamp):
         if count:
             summary_parts.append(f"{count} {label}{'s' if count != 1 else ''}")
 
-    # Group changes: model -> region -> (deployment, tier) -> [changes]
+    # Group changes: model -> (deployment, tier) -> price_signature -> [regions]
+    # price_signature = tuple of (direction, change_type, old_price, new_price, change_pct, meter)
+    # Regions with identical prices under the same deployment/tier are collapsed into one row.
     by_model = defaultdict(list)
     for c in changes:
         by_model[c.get("group_key", c["meter"])].append(c)
 
-    # Build HTML sections per model
     sections_html = ""
     for model_name in sorted(by_model.keys()):
         model_changes = by_model[model_name]
-        change_count = len(model_changes)
 
-        # Sub-group by (region, deployment, tier)
-        by_context = defaultdict(list)
+        # Group by (deployment, tier) first
+        by_dt = defaultdict(list)
         for c in model_changes:
-            key = (c["region"], c.get("deployment", ""), c.get("tier", "Standard"))
-            by_context[key].append(c)
+            key = (c.get("deployment", ""), c.get("tier", "Standard"))
+            by_dt[key].append(c)
 
         rows_html = ""
-        for (region, deployment, tier), ctx_changes in sorted(by_context.items()):
-            context_label = region
-            if deployment:
-                context_label += f" / {deployment}"
-            if tier and tier != "Standard":
-                context_label += f" / {tier}"
+        for (deployment, tier) in sorted(by_dt.keys()):
+            dt_changes = by_dt[(deployment, tier)]
 
-            rows_html += f"""
+            # Within this deployment/tier, group identical price rows across regions
+            # key: (direction, change_type, old_price, new_price, change_pct)
+            price_to_regions = defaultdict(list)
+            price_row_data = {}
+            for c in dt_changes:
+                sig = (
+                    c.get("direction", ""),
+                    c["change_type"],
+                    c.get("old_price"),
+                    c.get("new_price"),
+                    c.get("change_pct"),
+                    c["meter"],
+                )
+                price_to_regions[sig].append(c["region"])
+                price_row_data[sig] = c
+
+            # Build region label: list regions, collapse to "+N more" if many
+            # Group rows that share the exact same region set
+            region_set_to_sigs = defaultdict(list)
+            for sig, regions in price_to_regions.items():
+                region_set_to_sigs[tuple(sorted(regions))].append(sig)
+
+            for regions_tuple, sigs in sorted(region_set_to_sigs.items()):
+                regions = list(regions_tuple)
+                if len(regions) <= 4:
+                    region_label = ", ".join(regions)
+                else:
+                    region_label = f"{', '.join(regions[:3])} +{len(regions) - 3} more"
+
+                context_label = deployment or "Unknown"
+                if tier and tier != "Standard":
+                    context_label += f" / {tier}"
+                context_label += f"  <span style='font-weight:normal;color:#777;'>[{region_label}]</span>"
+
+                rows_html += f"""
             <tr style="background: #f0f0f0;">
-                <td colspan="4" style="padding: 6px 10px; font-weight: bold; font-size: 12px; color: #555;">
+                <td colspan="3" style="padding: 6px 10px; font-weight: bold; font-size: 12px; color: #444;">
                     {context_label}
                 </td>
             </tr>"""
 
-            for c in ctx_changes:
-                color = colors.get(c["change_type"], "#333")
-                direction = c.get("direction", "")
-                change_type = c["change_type"].upper()
+                # Sort rows by direction order
+                direction_order = {"Input": 0, "Cached Input": 1, "Output": 2}
+                sigs_sorted = sorted(sigs, key=lambda s: direction_order.get(s[0], 99))
 
-                if c["change_type"] == "new":
-                    price_str = f'<span style="color:{color};font-weight:bold;">NEW</span> ${c["new_price"]:.6f}'
-                elif c["change_type"] == "removed":
-                    price_str = f'<span style="color:{color};font-weight:bold;">REMOVED</span> (was ${c["old_price"]:.6f})'
-                else:
-                    arrow = "&#9650;" if c["change_type"] == "increased" else "&#9660;"
-                    pct = f'{c["change_pct"]:+.1f}%' if c["change_pct"] is not None else ""
-                    price_str = (
-                        f'${c["old_price"]:.6f} &rarr; ${c["new_price"]:.6f} '
-                        f'<span style="color:{color};font-weight:bold;">{pct} {arrow}</span>'
-                    )
+                for sig in sigs_sorted:
+                    c = price_row_data[sig]
+                    color = colors.get(c["change_type"], "#333")
+                    direction = c.get("direction", "") or c["meter"]
+                    change_type = c["change_type"].upper()
 
-                rows_html += f"""
+                    if c["change_type"] == "new":
+                        price_str = f'<span style="color:{color};font-weight:bold;">NEW</span> ${c["new_price"]:.6f}'
+                    elif c["change_type"] == "removed":
+                        price_str = f'<span style="color:{color};font-weight:bold;">REMOVED</span> (was ${c["old_price"]:.6f})'
+                    else:
+                        arrow = "&#9650;" if c["change_type"] == "increased" else "&#9660;"
+                        pct = f'{c["change_pct"]:+.1f}%' if c["change_pct"] is not None else ""
+                        price_str = (
+                            f'${c["old_price"]:.6f} &rarr; ${c["new_price"]:.6f} '
+                            f'<span style="color:{color};font-weight:bold;">{pct} {arrow}</span>'
+                        )
+
+                    rows_html += f"""
             <tr>
-                <td style="padding: 4px 10px 4px 24px; font-size: 13px;">{direction or c["meter"]}</td>
+                <td style="padding: 4px 10px 4px 24px; font-size: 13px; width: 140px;">{direction}</td>
                 <td style="padding: 4px 8px; font-size: 13px;">{price_str}</td>
                 <td style="padding: 4px 8px; font-size: 12px; color:{color}; font-weight:bold;">{change_type}</td>
-                <td style="padding: 4px 8px; font-size: 11px; color: #888;">{c["meter"]}</td>
             </tr>"""
 
+        # Count unique (deployment, tier, direction, price) combos — not raw region×meter count
+        unique_changes = sum(len(sigs) for dt_changes in by_dt.values()
+                             for sigs in [set(
+                                 (c.get("direction"), c["change_type"], c.get("new_price"), c.get("old_price"))
+                                 for c in dt_changes
+                             )])
         sections_html += f"""
         <div style="margin-bottom: 16px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;">
             <div style="background: #2c3e50; color: white; padding: 8px 12px; font-size: 14px; font-weight: bold;">
                 {model_name}
                 <span style="font-weight: normal; font-size: 12px; opacity: 0.8;">
-                    ({change_count} change{'s' if change_count != 1 else ''})
+                    ({unique_changes} unique price change{'s' if unique_changes != 1 else ''})
                 </span>
             </div>
             <table style="border-collapse: collapse; width: 100%;">
