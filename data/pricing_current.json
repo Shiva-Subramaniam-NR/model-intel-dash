@@ -10,7 +10,7 @@
       },
       {
         "Meter": "4.1 pp inp Gl Tokens",
-        "Price": 0.0035,
+        "Price": 0.035,
         "Unit": "1K",
         "Product": "Azure OpenAI PP GPT4s"
       },
@@ -28,7 +28,7 @@
       },
       {
         "Meter": "5.1 codex inp Gl 1M Tokens",
-        "Price": 1.25,
+        "Price": 1.5,
         "Unit": "1M",
         "Product": "Azure OpenAI GPT5"
       },
@@ -154,7 +154,7 @@
       },
       {
         "Meter": "Az-Provisioned Throughput Unit",
-        "Price": 2.0,
+        "Price": 2.5,
         "Unit": "1/Hour",
         "Product": "Azure OpenAI"
       },
@@ -316,7 +316,7 @@
       },
       {
         "Meter": "GPT 5.1 cd inp Gl 1M Tokens",
-        "Price": 0.125,
+        "Price": 0.15,
         "Unit": "1M",
         "Product": "Azure OpenAI GPT5"
       },
